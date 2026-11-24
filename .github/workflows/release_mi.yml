@@ -1,0 +1,44 @@
+name: Build Release
+on:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - run: chmod +x gradlew
+      - name: Prepare keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+      - name: Build signed release
+        env:
+          QURANAPP_KEYSTORE_FILE: ${{ runner.temp }}/release.keystore
+          QURANAPP_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          QURANAPP_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          QURANAPP_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease
+      - name: Read version
+        id: ver
+        run: |
+          VN=$(grep -m1 'versionName' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "name=$VN" >> "$GITHUB_OUTPUT"
+      - name: List APKs
+        run: find app/build/outputs -name '*.apk'
+      - name: Publish release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          APK=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
+          TAG="v${{ steps.ver.outputs.name }}-$(date +%Y%m%d%H%M)"
+          gh release create "$TAG" "$APK" \
+            --title "QuranApp ${{ steps.ver.outputs.name }}" \
+            --notes "Сборка подписана личным ключом."
